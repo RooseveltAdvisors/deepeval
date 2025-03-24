@@ -1,6 +1,7 @@
 from enum import Enum
 import os
 import json
+import csv
 from pydantic import BaseModel, Field
 from typing import Any, Optional, List, Dict, Union
 import shutil
@@ -28,9 +29,12 @@ from deepeval.utils import (
     is_in_ci_env,
 )
 from deepeval.test_run.cache import global_test_run_cache_manager
-from deepeval.constants import LOGIN_PROMPT
+from deepeval.constants import LOGIN_PROMPT, RESULTS_DIR
 
 TEMP_FILE_NAME = "temp_test_run_data.json"
+
+# Ensure results directory exists
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
 class TestRunResultDisplay(Enum):
@@ -308,13 +312,13 @@ class TestRunManager:
     def __init__(self):
         self.test_run = None
         self.temp_file_name = TEMP_FILE_NAME
-        self.save_to_disk = False
+        self.save_to_disk = True
         self.disable_request = False
 
     def reset(self):
         self.test_run = None
         self.temp_file_name = TEMP_FILE_NAME
-        self.save_to_disk = False
+        self.save_to_disk = True
         self.disable_request = False
 
     def set_test_run(self, test_run: TestRun):
@@ -732,12 +736,9 @@ class TestRunManager:
                     raise Exception(message) from e
 
             console.print(
-                "[rgb(5,245,141)]✓[/rgb(5,245,141)] Tests finished 🎉! View results on "
-                f"[link={link}]{link}[/link]."
+                "\n[rgb(5,245,141)]✓[/rgb(5,245,141)] Tests finished 🎉! View results at [link=http://localhost:8501]http://localhost:8501[/link]\n"
             )
-
-            if is_in_ci_env() == False:
-                webbrowser.open(link)
+            webbrowser.open("http://localhost:8501")
 
             return link
         else:
@@ -767,6 +768,70 @@ class TestRunManager:
                 print(f"Results saved in {local_folder} as {new_test_filename}")
             os.remove(new_test_filename)
 
+    def save_test_run_as_csv(self):
+        """Save test run results as CSV file."""
+        if not self.test_run:
+            return
+            
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_filename = f"deepeval_results_{timestamp}.csv"
+        csv_path = os.path.join(RESULTS_DIR, csv_filename)
+        
+        # Prepare data for CSV
+        rows = []
+        
+        # Add test case results
+        for test_case in self.test_run.test_cases:
+            if test_case.metrics_data:
+                for metric_data in test_case.metrics_data:
+                    row = {
+                        'timestamp': timestamp,
+                        'test_case_name': test_case.name,
+                        'metric_name': metric_data.name,
+                        'score': metric_data.score,
+                        'threshold': metric_data.threshold,
+                        'success': metric_data.success,
+                        'reason': metric_data.reason,
+                        'error': metric_data.error,
+                        'evaluation_model': metric_data.evaluation_model,
+                        'run_duration': test_case.run_duration,
+                        'input': test_case.input if hasattr(test_case, 'input') else None,
+                        'actual_output': test_case.actual_output if hasattr(test_case, 'actual_output') else None,
+                        'expected_output': test_case.expected_output if hasattr(test_case, 'expected_output') else None,
+                    }
+                    rows.append(row)
+                    
+        # Add conversational test case results
+        for conv_test_case in self.test_run.conversational_test_cases:
+            if conv_test_case.metrics_data:
+                for metric_data in conv_test_case.metrics_data:
+                    row = {
+                        'timestamp': timestamp,
+                        'test_case_name': conv_test_case.name,
+                        'metric_name': metric_data.name,
+                        'score': metric_data.score,
+                        'threshold': metric_data.threshold,
+                        'success': metric_data.success,
+                        'reason': metric_data.reason,
+                        'error': metric_data.error,
+                        'evaluation_model': metric_data.evaluation_model,
+                        'run_duration': conv_test_case.run_duration,
+                        'conversation_type': 'conversational',
+                    }
+                    rows.append(row)
+
+        # Write to CSV
+        if rows:
+            fieldnames = list(rows[0].keys())
+            with open(csv_path, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+            
+            print(f"\n[rgb(5,245,141)]✓[/rgb(5,245,141)] Results saved to {csv_path}")
+            
+        return csv_path
+
     def wrap_up_test_run(
         self,
         runDuration: float,
@@ -794,6 +859,7 @@ class TestRunManager:
                 global_test_run_cache_manager.temp_cache_file_name
             )
             return
+            
         test_run.run_duration = runDuration
         test_run.calculate_test_passes_and_fails()
         test_run.sort_test_cases()
@@ -809,7 +875,8 @@ class TestRunManager:
         if display_table:
             self.display_results_table(test_run, display)
 
-        self.save_test_run_locally()
+        # Save results as CSV
+        self.save_test_run_as_csv()
         delete_file_if_exists(self.temp_file_name)
 
         if (

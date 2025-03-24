@@ -144,3 +144,23 @@ class LLMTestCase:
                 raise TypeError(
                     "'expected_tools' must be None or a list of `ToolCall`"
                 )
+
+    def dict(self) -> Dict[str, Any]:
+        """Convert the test case to a dictionary.
+        
+        Returns:
+            Dict[str, Any]: Dictionary representation of the test case
+        """
+        return {
+            'input': self.input,
+            'actual_output': self.actual_output,
+            'expected_output': self.expected_output,
+            'context': self.context,
+            'retrieval_context': self.retrieval_context,
+            'additional_metadata': self.additional_metadata,
+            'comments': self.comments,
+            'tools_called': [tool.dict() for tool in self.tools_called] if self.tools_called else None,
+            'expected_tools': [tool.dict() for tool in self.expected_tools] if self.expected_tools else None,
+            'reasoning': self.reasoning,
+            'name': self.name
+        }

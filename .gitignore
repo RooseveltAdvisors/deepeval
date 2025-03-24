@@ -172,3 +172,8 @@ secrets
 # Mac OS system files
 **/.DS_Store
 
+# Cursor
+*.mdc
+
+# DeepEval results
+.deepeval_results/

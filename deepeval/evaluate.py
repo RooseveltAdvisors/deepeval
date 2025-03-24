@@ -1,7 +1,7 @@
 import asyncio
 from copy import deepcopy
 import os
-from typing import Callable, List, Optional, Union, Dict
+from typing import Callable, List, Optional, Union, Dict, Any
 import time
 from dataclasses import dataclass
 from pydantic import BaseModel
@@ -53,6 +53,7 @@ from deepeval.test_run.cache import (
     CachedTestCase,
     CachedMetricData,
 )
+from deepeval.storage import StorageBackend, LocalStorage
 
 
 @dataclass
@@ -1013,94 +1014,43 @@ def assert_test(
 
 
 def evaluate(
-    test_cases: Union[
-        List[Union[LLMTestCase, MLLMTestCase]], List[ConversationalTestCase]
-    ],
+    test_cases: List[LLMTestCase],
     metrics: List[BaseMetric],
-    hyperparameters: Optional[Dict[str, Union[str, int, float]]] = None,
-    run_async: bool = True,
-    show_indicator: bool = True,
-    print_results: bool = True,
-    write_cache: bool = True,
-    use_cache: bool = False,
-    ignore_errors: bool = False,
-    skip_on_missing_params: bool = False,
-    verbose_mode: Optional[bool] = None,
-    identifier: Optional[str] = None,
-    throttle_value: int = 0,
-    max_concurrent: int = 100,
-    display: Optional[TestRunResultDisplay] = TestRunResultDisplay.ALL,
-) -> EvaluationResult:
-    check_valid_test_cases_type(test_cases)
-
-    if hyperparameters is not None:
-        if (
-            hyperparameters.get("model") is None
-            or hyperparameters.get("prompt template") is None
-        ):
-            raise ValueError(
-                "A `model` and `prompt template` key must be provided when logging `hyperparameters`."
-            )
-        hyperparameters = process_hyperparameters(hyperparameters)
-
-    global_test_run_manager.reset()
-    start_time = time.perf_counter()
-
-    if show_indicator:
-        console = Console()
-        for metric in metrics:
-            console.print(
-                format_metric_description(metric, async_mode=run_async)
-            )
-
-    with capture_evaluation_run("evaluate()"):
-        if run_async:
-            loop = get_or_create_event_loop()
-            test_results = loop.run_until_complete(
-                a_execute_test_cases(
-                    test_cases,
-                    metrics,
-                    ignore_errors=ignore_errors,
-                    use_cache=use_cache,
-                    verbose_mode=verbose_mode,
-                    save_to_disk=write_cache,
-                    show_indicator=show_indicator,
-                    skip_on_missing_params=skip_on_missing_params,
-                    throttle_value=throttle_value,
-                    identifier=identifier,
-                    max_concurrent=max_concurrent,
-                )
-            )
-        else:
-            test_results = execute_test_cases(
-                test_cases,
-                metrics,
-                ignore_errors=ignore_errors,
-                use_cache=use_cache,
-                verbose_mode=verbose_mode,
-                save_to_disk=write_cache,
-                skip_on_missing_params=skip_on_missing_params,
-                identifier=identifier,
-                show_indicator=show_indicator,
-            )
-
-    end_time = time.perf_counter()
-    run_duration = end_time - start_time
-    if print_results:
-        for test_result in test_results:
-            print_test_result(test_result, display)
-
-        aggregate_metric_pass_rates(test_results)
-
-    test_run = global_test_run_manager.get_test_run()
-    test_run.hyperparameters = hyperparameters
-    global_test_run_manager.save_test_run()
-    confident_link = global_test_run_manager.wrap_up_test_run(
-        run_duration, display_table=False
-    )
-    return EvaluationResult(
-        test_results=test_results, confident_link=confident_link
-    )
+    storage: Optional[StorageBackend] = None
+) -> Dict[str, Any]:
+    """Evaluate test cases using specified metrics.
+    
+    Args:
+        test_cases: List of test cases to evaluate
+        metrics: List of metrics to use for evaluation
+        storage: Optional storage backend for saving results
+        
+    Returns:
+        Dict containing evaluation results
+    """
+    # Use default local storage if none provided
+    storage = storage or LocalStorage()
+    
+    # Run evaluation for each test case
+    results = {}
+    for metric in metrics:
+        metric_results = []
+        for test_case in test_cases:
+            score = metric.measure(test_case)
+            metric_results.append({
+                'score': score,
+                'success': metric.is_successful(),
+                'reason': metric.reason if metric.include_reason else None
+            })
+        # Convert metric name to lowercase and replace spaces with underscores
+        metric_name = metric.__name__.lower().replace(' ', '_')
+        results[metric_name] = metric_results
+    
+    # Save results
+    result_id = storage.save_results(test_cases, metrics, results)
+    results['result_id'] = result_id
+    
+    return results
 
 
 def print_test_result(test_result: TestResult, display: TestRunResultDisplay):
