@@ -87,8 +87,19 @@ class LocalStorage(StorageBackend):
         test_file = "unknown"
         test_subject = "unknown"
         
-        if test_cases and hasattr(test_cases[0], 'name'):
-            test_subject = test_cases[0].name or "unknown"
+        if test_cases:
+            test_case = test_cases[0]
+            # Try to get subject from test case name
+            if hasattr(test_case, 'name') and test_case.name:
+                test_subject = test_case.name
+            # If no name, try to get from input query
+            elif hasattr(test_case, 'input') and test_case.input:
+                # Clean and truncate the input to create a subject
+                test_subject = test_case.input.strip().lower()
+                # Convert to snake_case and limit length
+                test_subject = test_subject.replace(' ', '_')[:50]
+                # Remove any special characters
+                test_subject = ''.join(c for c in test_subject if c.isalnum() or c == '_')
         
         # Try to get test file name from traceback
         import traceback
