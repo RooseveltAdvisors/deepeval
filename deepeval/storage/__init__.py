@@ -66,7 +66,11 @@ class LocalStorage(StorageBackend):
     ) -> str:
         """Save results to a local JSON file.
         
-        Generates a unique ID using UUID and timestamp to ensure uniqueness.
+        Generates a descriptive filename including:
+        - Test type (integration/unit)
+        - Test file name
+        - Test case name/subject
+        - Timestamp for uniqueness
         
         Args:
             test_cases: List of test cases that were evaluated
@@ -77,7 +81,25 @@ class LocalStorage(StorageBackend):
             str: Unique identifier for the saved results
         """
         timestamp = int(time.time() * 1000)
-        result_id = f"{timestamp}-{uuid.uuid4()}"
+        
+        # Get test type and file name from the test case
+        test_type = "unknown"
+        test_file = "unknown"
+        test_subject = "unknown"
+        
+        if test_cases and hasattr(test_cases[0], 'name'):
+            test_subject = test_cases[0].name or "unknown"
+        
+        # Try to get test file name from traceback
+        import traceback
+        for frame in traceback.extract_stack():
+            if 'test_' in frame.filename and frame.filename.endswith('.py'):
+                test_file = Path(frame.filename).stem
+                test_type = "integration" if "integration" in test_file else "unit"
+                break
+        
+        # Generate descriptive result ID
+        result_id = f"{test_file}-{test_type}-{test_subject}-{timestamp}"
         file_path = self.storage_dir / f"{result_id}.json"
         
         # Convert test cases and metrics to serializable format
@@ -85,7 +107,10 @@ class LocalStorage(StorageBackend):
             'test_cases': [tc.dict() for tc in test_cases],
             'metrics': [metric.__name__ for metric in metrics],
             'results': results,
-            'timestamp': timestamp
+            'timestamp': timestamp,
+            'test_type': test_type,
+            'test_file': test_file,
+            'test_subject': test_subject
         }
         
         with open(file_path, "w") as f:
